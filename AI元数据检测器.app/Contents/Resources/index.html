@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI 元数据检测器</title>
+<style>
+:root{--bg:#f6f7f9;--fg:#1f2328;--muted:#656d76;--border:#e3e6ea;--card:#fff;--code:#f2f4f7;--accent:#7C5CFF}
+@media (prefers-color-scheme:dark){:root{--bg:#0d1117;--fg:#e6edf3;--muted:#8b949e;--border:#2a3038;--card:#161b22;--code:#0d1117;--accent:#9b83ff}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);
+ font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Segoe UI",sans-serif}
+.wrap{max-width:900px;margin:0 auto;padding:26px 20px 70px}
+h1{font-size:21px;margin:0 0 4px}
+.sub{color:var(--muted);font-size:13px;margin-bottom:20px;line-height:1.6}
+.disclaimer{border:1px solid #f5a62366;background:color-mix(in srgb,#f5a623 12%,var(--card));
+ border-radius:12px;padding:12px 15px;margin:0 0 18px;font-size:12.5px;line-height:1.7;color:var(--fg)}
+.disclaimer b{color:#c77700}
+@media (prefers-color-scheme:dark){.disclaimer b{color:#f5b544}}
+#drop{border:2px dashed var(--border);border-radius:16px;background:var(--card);
+ padding:44px 20px;text-align:center;transition:.15s;cursor:pointer}
+#drop.hot{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 8%,var(--card))}
+#drop .big{font-size:40px}
+#drop .t{font-size:15px;font-weight:600;margin-top:10px}
+#drop .h{font-size:12.5px;color:var(--muted);margin-top:6px}
+#list{margin-top:22px}
+.item{margin-bottom:16px}
+.actions{display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+ margin:-6px 0 0;padding:12px 16px;border:1px solid var(--border);border-top:none;
+ border-radius:0 0 12px 12px;background:var(--card)}
+button.act{border:none;background:var(--accent);color:#fff;font-weight:600;
+ padding:8px 15px;border-radius:9px;cursor:pointer;font-size:13px}
+button.act:disabled{opacity:.5;cursor:default}
+label.rnd{font-size:12.5px;color:var(--muted);display:flex;align-items:center;gap:5px;cursor:pointer}
+.msg{font-size:12.5px;color:var(--muted)}
+.msg.ok{color:#30a46c}.msg.err{color:#e5484d}
+.spin{display:inline-block;width:13px;height:13px;border:2px solid var(--border);
+ border-top-color:var(--accent);border-radius:50%;animation:sp .7s linear infinite;vertical-align:-2px}
+@keyframes sp{to{transform:rotate(360deg)}}
+footer{color:var(--muted);font-size:11.5px;margin-top:30px;line-height:1.7;text-align:center}
+/* ---- 复用检测报告卡片样式 ---- */
+.card{background:var(--card);border:1px solid var(--border);border-left:5px solid var(--vc);
+ border-radius:12px;padding:16px 18px;box-shadow:0 1px 2px rgba(0,0,0,.04)}
+.card.hasact{border-radius:12px 12px 0 0}
+.head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.badge{font-weight:700;font-size:15px;color:var(--vc)}
+.fname{color:var(--muted);font-size:13px;word-break:break-all}
+.card .sub{font-size:12px;color:var(--muted);margin:6px 0 2px}
+.note{font-size:13px;color:var(--muted);margin:8px 0 4px;line-height:1.6}
+.findings{margin-top:12px}
+.ft{font-size:12px;font-weight:600;color:var(--muted);margin-bottom:6px}
+.finding{border:1px solid var(--border);border-radius:9px;padding:9px 11px;margin-bottom:8px;background:var(--bg)}
+.finding.gen{border-color:#e5484d55}.finding.edit{border-color:#f5a62355}.finding.prov{border-color:#4493f855}
+.fl{font-weight:600;font-size:13.5px}
+.fd{margin:4px 0}.fd code{font-size:12px;background:var(--code);padding:2px 6px;border-radius:5px;
+ word-break:break-all;white-space:pre-wrap;display:inline-block;max-width:100%}
+.fs{font-size:11px;color:var(--muted)}
+details.meta{margin-top:12px}
+summary{cursor:pointer;font-size:13px;color:var(--muted);user-select:none}
+.mt{font-size:12px;font-weight:600;margin:12px 0 6px;color:var(--muted)}
+table{width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed}
+td{border:1px solid var(--border);padding:5px 8px;vertical-align:top;word-break:break-all}
+td:first-child{width:34%;color:var(--muted);font-weight:600}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🔎 AI 元数据检测器</h1>
+  <div class="sub">把图片 / 视频从 Finder 拖到下面的方框，检测是否携带 AI 生成 / AIGC 标识元数据。全程本机离线完成。</div>
+
+  <div class="disclaimer">
+    ⚠️ <b>免责声明</b>：本工具仅供<b>技术研究、学习与合法的元数据检测测试</b>之用。请勿用于任何违法违规用途——
+    部分国家/地区（如中国《人工智能生成合成内容标识办法》及 GB 45438-2025）明确<b>禁止恶意删除、篡改、伪造或隐匿</b>生成合成内容标识；
+    使用者应确保仅对<b>自己拥有合法权利的文件</b>进行操作，并自行判断与遵守所在地法律。
+    <b>因使用本工具产生的一切后果由使用者自行承担，与作者无关。</b>继续使用即表示您已阅读并同意本声明。
+  </div>
+
+  <div id="drop">
+    <div class="big">📥</div>
+    <div class="t">拖拽文件到这里</div>
+    <div class="h">支持批量 · 或点击选择 · 图片 / 视频</div>
+    <input id="file" type="file" multiple accept="image/*,video/*" hidden>
+  </div>
+
+  <div id="list"></div>
+
+  <footer>
+    检测依据：C2PA 内容凭证、中国 AIGC 标识(GB 45438-2025)、IPTC/XMP/EXIF 元数据、已知生成器署名。<br>
+    元数据可被压缩、平台抹除或伪造 —— 结果仅供参考。去标识仅移除元数据，不改动画面像素。<br>
+    全程本机离线，不上传任何文件到互联网。
+  </footer>
+</div>
+
+<script>
+const listEl = document.getElementById('list');
+const drop = document.getElementById('drop');
+const fileInput = document.getElementById('file');
+
+function esc(s){return (s+'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+
+// 拖到 App 图标 / 命令行传入的本地路径
+window.addEventListener('DOMContentLoaded', () => {
+  const q = new URLSearchParams(location.search).get('paths');
+  if(q){ try{ detectPaths(JSON.parse(q)); }catch(e){} }
+});
+
+async function detectPaths(paths){
+  for(const p of paths){
+    const item = addPlaceholder(p.split('/').pop());
+    try{
+      const res = await fetch('/detect-path', {method:'POST',
+        headers:{'Content-Type':'application/json'}, body:JSON.stringify({paths:[p]})});
+      const j = await res.json();
+      if(j.results && j.results[0]) renderResult(item, j.results[0]);
+      else fail(item, '无法读取该文件');
+    }catch(e){ fail(item, e.message); }
+  }
+}
+
+// 浏览器内拖拽 / 选择 → 上传字节
+['dragenter','dragover'].forEach(ev=>window.addEventListener(ev,e=>{e.preventDefault();drop.classList.add('hot');}));
+['dragleave','drop'].forEach(ev=>window.addEventListener(ev,e=>{
+  if(ev==='dragleave' && e.relatedTarget) return;
+  e.preventDefault();drop.classList.remove('hot');
+}));
+window.addEventListener('drop', e=>{ if(e.dataTransfer.files.length) handleFiles(e.dataTransfer.files); });
+drop.addEventListener('click', ()=>fileInput.click());
+fileInput.addEventListener('change', ()=>{ if(fileInput.files.length) handleFiles(fileInput.files); fileInput.value=''; });
+
+function handleFiles(files){ for(const f of files) uploadDetect(f); }
+
+async function uploadDetect(file){
+  const item = addPlaceholder(file.name);
+  try{
+    const res = await fetch('/detect', {method:'POST',
+      headers:{'X-Filename': encodeURIComponent(file.name)}, body:file});
+    const j = await res.json();
+    if(j.error) return fail(item, j.error);
+    renderResult(item, j);
+  }catch(e){ fail(item, e.message); }
+}
+
+function addPlaceholder(name){
+  const d = document.createElement('div'); d.className='item';
+  d.innerHTML = `<div class="card" style="--vc:var(--muted)"><div class="head">
+    <span class="badge"><span class="spin"></span> 检测中…</span>
+    <span class="fname">${esc(name)}</span></div></div>`;
+  listEl.prepend(d); return d;
+}
+function fail(item, m){
+  item.innerHTML = `<div class="card" style="--vc:#e5484d"><div class="head">
+    <span class="badge">⚠️ 出错</span></div><p class="note">${esc(m)}</p></div>`;
+}
+
+function renderResult(item, r){
+  item.innerHTML = r.cardHtml;
+  const card = item.querySelector('.card');
+  if(!r.canClean) return;
+  card.classList.add('hasact');
+  const bar = document.createElement('div'); bar.className='actions';
+  bar.innerHTML = `
+    <button class="act">🧹 去除 AI / AIGC 标识并保存</button>
+    <label class="rnd"><input type="checkbox"> 同时随机化普通元数据</label>
+    <span class="msg"></span>`;
+  item.appendChild(bar);
+  const btn = bar.querySelector('button'), rnd = bar.querySelector('input'), msg = bar.querySelector('.msg');
+  btn.onclick = async ()=>{
+    btn.disabled = true; msg.className='msg'; msg.innerHTML = '<span class="spin"></span> 处理中…';
+    try{
+      const res = await fetch('/clean', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({token:r.token, randomize:rnd.checked})});
+      const j = await res.json();
+      if(j.error){ msg.className='msg err'; msg.textContent='失败：'+j.error; btn.disabled=false; return; }
+      const clean = j.verdict==='clean';
+      let where='';
+      if(j.savedPath){ where = '已保存到 '+j.savedPath; }
+      else if(j.download){ const a=document.createElement('a'); a.href=j.download; a.download=j.outName; a.click(); where='已开始下载 '+j.outName; }
+      msg.className='msg ok';
+      msg.textContent = (clean?'✅ 已去除，复检为「未发现 AI 元数据」。':'⚠️ 已处理，但仍检出残留标记。') + ' ' + where;
+    }catch(e){ msg.className='msg err'; msg.textContent='失败：'+e.message; btn.disabled=false; }
+  };
+}
+</script>
+</body>
+</html>

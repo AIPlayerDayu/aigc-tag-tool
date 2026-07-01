@@ -1,0 +1,5 @@
+.DS_Store
+*.swp
+__pycache__/
+*.pyc
+src/icon-1024.png
