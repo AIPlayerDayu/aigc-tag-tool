@@ -49,42 +49,44 @@ def _rand_datetime():
            f"{random.randint(0,23):02d}:{random.randint(0,59):02d}:{random.randint(0,59):02d}"
 
 
-def _which(name):
-    for c in (f"/opt/homebrew/bin/{name}", f"/usr/local/bin/{name}", name):
-        p = shutil.which(c) if "/" not in c else (c if os.path.exists(c) else None)
-        if p:
-            return p
-    return name
+FFMPEG_HELP = ("视频去标识需要 ffmpeg。Windows 请运行： winget install Gyan.FFmpeg "
+               "（或 choco install ffmpeg）；macOS 请运行： brew install ffmpeg。装好后重开本工具即可。")
 
 
 def clean_file(src, name, kind, randomize=False):
-    """生成一个去除了 AI/AIGC 标识的干净副本，返回 (out_path, note)。"""
+    """生成一个去除了 AI/AIGC 标识的干净副本，返回 (out_path, out_name)。"""
     stem, ext = os.path.splitext(name)
     out_name = f"{stem}_已去AI标识{ext}"
     out_dir = tempfile.mkdtemp(prefix="ai-clean-")
     out = os.path.join(out_dir, out_name)
 
     if kind == "video":
+        ff = detect.find_ffmpeg()
+        if not ff:
+            raise RuntimeError(FFMPEG_HELP)
         # 直接流拷贝，去掉全部容器标签（含 AIGC），不重新编码 → 画质无损、速度快
-        cmd = [_which("ffmpeg"), "-y", "-i", src, "-map_metadata", "-1", "-map", "0",
-               "-c", "copy", "-movflags", "use_metadata_tags"]
+        cmd = [ff, "-y", "-i", src, "-map_metadata", "-1", "-map", "0", "-c", "copy"]
         if randomize:
             cmd += ["-metadata", "encoder=Lavf59.27.100"]
         cmd.append(out)
-        r = subprocess.run(cmd, capture_output=True, timeout=600)
+        r = subprocess.run(cmd, capture_output=True, timeout=600, **detect._NO_WINDOW)
         if r.returncode != 0 or not os.path.exists(out):
             raise RuntimeError("ffmpeg 处理失败：" + r.stderr.decode("utf-8", "replace")[-400:])
     else:
-        et = detect.find_exiftool()
-        if not et:
-            raise RuntimeError("去除图片元数据需要 exiftool，请先 brew install exiftool")
-        subprocess.run([et, "-all=", "-o", out, src], capture_output=True, timeout=120)
-        if not os.path.exists(out):
-            raise RuntimeError("exiftool 处理失败")
+        # 图片：纯 Python 无损剥离，零外部依赖（Windows 也无需装任何东西）
+        if not detect.strip_image_metadata(src, out):
+            et = detect.find_exiftool()   # HEIC 等少见格式回退到 exiftool
+            if not et:
+                raise RuntimeError("该图片格式暂需 exiftool 才能去除元数据（常见 JPEG/PNG/WebP 无需）")
+            subprocess.run([et, "-all=", "-o", out, src],
+                           capture_output=True, timeout=120, **detect._NO_WINDOW)
+            if not os.path.exists(out):
+                raise RuntimeError("exiftool 处理失败")
         if randomize:
-            subprocess.run([et, "-overwrite_original",
-                            f"-AllDates={_rand_datetime()}", out],
-                           capture_output=True, timeout=60)
+            et = detect.find_exiftool()
+            if et:
+                subprocess.run([et, "-overwrite_original", f"-AllDates={_rand_datetime()}", out],
+                               capture_output=True, timeout=60, **detect._NO_WINDOW)
     return out, out_name
 
 

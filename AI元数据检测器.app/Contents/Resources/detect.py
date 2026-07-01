@@ -106,21 +106,51 @@ MAX_SCAN = 8 * 1024 * 1024  # 大文件只扫描首尾各 8MB 找标记
 
 
 # --------------------------------------------------------------------------- #
-#  exiftool（可选）
+#  外部工具查找（跨平台：mac / Windows / Linux 均可，exiftool / ffmpeg 皆可选）
 # --------------------------------------------------------------------------- #
-def find_exiftool():
-    for c in ("/opt/homebrew/bin/exiftool", "/usr/local/bin/exiftool", "exiftool"):
-        p = shutil.which(c) if "/" not in c else (c if os.path.exists(c) else None)
+IS_WIN = os.name == "nt"
+# Windows 下用 pythonw 启动时，子进程默认会弹黑框，这里统一抑制
+_NO_WINDOW = {"creationflags": 0x08000000} if IS_WIN else {}
+
+
+def find_tool(name):
+    """在 PATH 与常见安装目录里找命令，返回可执行路径或 None。"""
+    cands = [name, name + ".exe"] if IS_WIN else [name]
+    for n in cands:
+        p = shutil.which(n)
         if p:
             return p
+    dirs = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"]
+    if IS_WIN:
+        pf = os.environ.get("ProgramFiles", r"C:\Program Files")
+        pf86 = os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")
+        la = os.environ.get("LOCALAPPDATA", "")
+        for base in (pf, pf86):
+            dirs += [base, os.path.join(base, name), os.path.join(base, name, "bin"),
+                     os.path.join(base, "ffmpeg", "bin")]
+        if la:
+            dirs.append(os.path.join(la, "Microsoft", "WindowsApps"))
+    for d in dirs:
+        for n in cands:
+            p = os.path.join(d, n)
+            if os.path.exists(p):
+                return p
     return None
+
+
+def find_exiftool():
+    return find_tool("exiftool")
+
+
+def find_ffmpeg():
+    return find_tool("ffmpeg")
 
 
 def run_exiftool(path, tool):
     try:
         out = subprocess.run(
             [tool, "-j", "-G1", "-a", "-u", "-ee", "-api", "largefilesupport=1", path],
-            capture_output=True, timeout=60,
+            capture_output=True, timeout=60, **_NO_WINDOW,
         )
         data = json.loads(out.stdout.decode("utf-8", "replace"))
         return data[0] if data else {}
@@ -129,11 +159,7 @@ def run_exiftool(path, tool):
 
 
 def find_ffprobe():
-    for c in ("/opt/homebrew/bin/ffprobe", "/usr/local/bin/ffprobe", "ffprobe"):
-        p = shutil.which(c) if "/" not in c else (c if os.path.exists(c) else None)
-        if p:
-            return p
-    return None
+    return find_tool("ffprobe")
 
 
 def run_ffprobe(path, probe):
@@ -142,7 +168,7 @@ def run_ffprobe(path, probe):
         out = subprocess.run(
             [probe, "-v", "error", "-show_entries",
              "format_tags:stream_tags", "-of", "json", path],
-            capture_output=True, timeout=60,
+            capture_output=True, timeout=60, **_NO_WINDOW,
         )
         data = json.loads(out.stdout.decode("utf-8", "replace"))
         tags = dict(data.get("format", {}).get("tags", {}))
@@ -151,6 +177,80 @@ def run_ffprobe(path, probe):
         return tags
     except Exception:
         return {}
+
+
+# --------------------------------------------------------------------------- #
+#  纯 Python 无损剥离图片元数据（无需 exiftool，跨平台）
+# --------------------------------------------------------------------------- #
+def _strip_jpeg(data):
+    out = bytearray(b"\xff\xd8")
+    i, n = 2, len(data)
+    while i + 4 <= n and data[i] == 0xFF:
+        marker = data[i + 1]
+        if marker in (0xD9, 0xDA):          # EOI / SOS：其后为压缩数据，整段原样拷贝
+            out += data[i:]
+            return bytes(out)
+        if 0xD0 <= marker <= 0xD7 or marker == 0x01:  # 无长度字段的标记
+            out += data[i:i + 2]
+            i += 2
+            continue
+        seg_len = struct.unpack(">H", data[i + 2:i + 4])[0]
+        # 丢弃所有 APPn(0xE0-0xEF：含 EXIF/XMP/ICC/IPTC/C2PA) 与 COM(0xFE：注释)
+        if not (0xE0 <= marker <= 0xEF or marker == 0xFE):
+            out += data[i:i + 2 + seg_len]
+        i += 2 + seg_len
+    out += data[i:]
+    return bytes(out)
+
+
+def _strip_png(data):
+    out = bytearray(data[:8])
+    i, n = 8, len(data)
+    drop = {b"tEXt", b"iTXt", b"zTXt", b"eXIf"}
+    while i + 8 <= n:
+        length = struct.unpack(">I", data[i:i + 4])[0]
+        ctype = data[i + 4:i + 8]
+        if ctype not in drop:
+            out += data[i:i + 12 + length]
+        i += 12 + length
+        if ctype == b"IEND":
+            break
+    return bytes(out)
+
+
+def _strip_webp(data):
+    body = bytearray()
+    i, n = 12, len(data)
+    while i + 8 <= n:
+        fourcc = data[i:i + 4]
+        size = struct.unpack("<I", data[i + 4:i + 8])[0]
+        total = 8 + size + (size & 1)
+        chunk = bytearray(data[i:i + total])
+        if fourcc in (b"EXIF", b"XMP "):
+            i += total
+            continue
+        if fourcc == b"VP8X" and len(chunk) >= 9:     # 清掉 EXIF/XMP 存在标志位
+            chunk[8] &= ~(0x08 | 0x04) & 0xFF
+        body += chunk
+        i += total
+    return bytes(b"RIFF" + struct.pack("<I", 4 + len(body)) + b"WEBP" + body)
+
+
+def strip_image_metadata(src, out):
+    """无损剥离 JPEG/PNG/WebP 的全部元数据。返回 True 表示已处理该格式。"""
+    with open(src, "rb") as f:
+        data = f.read()
+    if data[:2] == b"\xff\xd8":
+        res = _strip_jpeg(data)
+    elif data[:4] == b"\x89PNG":
+        res = _strip_png(data)
+    elif data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        res = _strip_webp(data)
+    else:
+        return False
+    with open(out, "wb") as f:
+        f.write(res)
+    return True
 
 
 # --------------------------------------------------------------------------- #

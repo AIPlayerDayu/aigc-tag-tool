@@ -1,6 +1,8 @@
-# 🔎 AIGC 标识检测去除工具（macOS）
+# 🔎 AIGC 标识检测去除工具（macOS / Windows）
 
 检测**图片 / 视频**是否携带「AI 生成 / AIGC 标识」等元数据痕迹，并可**一键去除这些标识**生成干净副本。全程本机离线，不上传任何文件。
+
+> 🪟 **Windows 用户** → 看这里：[Windows安装说明.md](Windows安装说明.md)（新手向，三步搞定）。
 
 > ⚠️ **免责声明**：本工具仅供**技术研究、学习与合法的元数据检测测试**之用，**请勿用于任何违法违规用途**。
 > 部分国家/地区（如中国《人工智能生成合成内容标识办法》及 GB 45438-2025）明确**禁止恶意删除、篡改、伪造或隐匿**生成合成内容标识。
@@ -8,10 +10,10 @@
 
 ## 使用
 
-打开 App 会弹出一个网页窗口，把图片/视频从 **Finder 直接拖进方框**（可批量）即可检测；也可以把文件拖到 **App 图标**上，或点击方框选择文件。
+无论 mac 还是 Windows，都是打开后弹出一个**网页窗口**，把图片/视频从文件管理器**直接拖进方框**（可批量）即可检测；也可以点方框选择文件。
 
-- 拖到窗口里 → 上传字节检测（浏览器安全限制拿不到原始路径，去标识会生成可下载的干净副本）。
-- 拖到 App 图标上 → 按原始路径检测，去标识后**直接把干净副本存到原文件旁边**。
+- **macOS**：双击 `AI元数据检测器.app`（首次右键→打开）。还可把文件拖到 **App 图标**上，此时按原始路径检测、去标识后直接把干净副本存到原文件旁边。
+- **Windows**：双击 `启动_Windows.bat`（详见 [Windows安装说明.md](Windows安装说明.md)）。拖进窗口检测，去标识后干净副本自动下载到「下载」文件夹。
 
 ## 判定分档
 
@@ -46,30 +48,38 @@
 
 ## 安装
 
-1. 打开 `AI元数据检测器.dmg`，把 App 拖到「应用程序」。
-2. 首次打开：右键 App → **打开**（自签名应用，需绕过 Gatekeeper 一次）。
+- **macOS**：打开 `AI元数据检测器.dmg` → 把 App 拖到「应用程序」→ 首次右键 App → **打开**（自签名应用，绕过 Gatekeeper 一次）。
+- **Windows**：装好 Python 后双击 `启动_Windows.bat` 即可，详见 [Windows安装说明.md](Windows安装说明.md)。
 
 ## 依赖
 
-- 图片（PNG/JPEG/WebP）检测**零依赖**。
-- **视频检测、去标识**需要 `exiftool` 与 `ffmpeg`：
-  ```bash
-  brew install exiftool ffmpeg
-  ```
-  未安装时图片检测仍可用，页面会提示缺失。
+| 功能 | 需要什么 |
+|------|----------|
+| 图片检测（PNG/JPEG/WebP…） | **零依赖**（纯 Python） |
+| 图片去标识 | **零依赖**（纯 Python 无损剥离元数据） |
+| 视频检测（含 AIGC 标识） | **零依赖**（`ffprobe`/`exiftool` 存在时结果更全，但非必需） |
+| 视频去标识 | 需要 **`ffmpeg`**（无损流拷贝去容器标签）。macOS：`brew install ffmpeg`；Windows：`winget install Gyan.FFmpeg` |
+
+> HEIC 等少见格式的深度解析会用到 `exiftool`（可选）。缺失时页面会给出提示，常见格式不受影响。
 
 ## 架构 / 从源码构建
 
-无需 Xcode。App = AppleScript applet（启动本地服务 + 打开网页）+ 纯标准库 Python：
+纯标准库 Python，跨平台。启动器负责「起本地服务 + 打开网页」：mac 用 AppleScript applet，Windows 用 `.bat`/`.vbs`。
 
-- `src/detect.py` —— 检测引擎（PNG/JPEG/WebP/MP4 字节解析 + 可选 exiftool/ffprobe）
+- `src/detect.py` —— 检测引擎（PNG/JPEG/WebP/MP4 字节解析 + 纯 Python 图片去标识 + 可选 exiftool/ffprobe）
 - `src/server.py` —— 本地服务（`127.0.0.1:8765`，检测/去标识/下载；30 分钟无活动自动退出）
 - `src/index.html` —— 拖拽前端
 - `src/make_icon.py` —— 程序化生成图标（无版权素材）
+- `启动_Windows.bat` / `启动_Windows(无窗口).vbs` —— Windows 启动器
+- `build.sh` / `make_dmg.sh` —— macOS 打包（无需 Xcode）
 
 ```bash
+# macOS 打包
 ./build.sh       # 生成 AI元数据检测器.app
 ./make_dmg.sh    # 打包为 AI元数据检测器.dmg
+
+# 任意平台直接跑（开发/调试）
+python3 src/server.py    # 然后浏览器打开 http://127.0.0.1:8765/
 ```
 
 ## 隐私
