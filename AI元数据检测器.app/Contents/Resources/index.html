@@ -23,7 +23,12 @@ h1{font-size:21px;margin:0 0 4px}
 #drop .big{font-size:40px}
 #drop .t{font-size:15px;font-weight:600;margin-top:10px}
 #drop .h{font-size:12.5px;color:var(--muted);margin-top:6px}
-#list{margin-top:22px}
+#summary{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:20px;
+ padding:10px 14px;border:1px solid var(--border);border-radius:10px;background:var(--card);font-size:13px}
+#summary .stat{font-weight:600}
+#exportBtn{margin-left:auto;border:1px solid var(--border);background:var(--bg);color:var(--fg);
+ padding:6px 12px;border-radius:8px;cursor:pointer;font-size:12.5px}
+#list{margin-top:16px}
 .item{margin-bottom:16px}
 .actions{display:flex;align-items:center;gap:12px;flex-wrap:wrap;
  margin:-6px 0 0;padding:12px 16px;border:1px solid var(--border);border-top:none;
@@ -80,6 +85,11 @@ td:first-child{width:34%;color:var(--muted);font-weight:600}
     <div class="t">拖拽文件到这里</div>
     <div class="h">支持批量 · 或点击选择 · 图片 / 视频</div>
     <input id="file" type="file" multiple accept="image/*,video/*" hidden>
+  </div>
+
+  <div id="summary" hidden>
+    <span class="stat"></span>
+    <button id="exportBtn">📄 导出检测报告 (CSV)</button>
   </div>
 
   <div id="list"></div>
@@ -150,25 +160,50 @@ function addPlaceholder(name){
 function fail(item, m){
   item.innerHTML = `<div class="card" style="--vc:#e5484d"><div class="head">
     <span class="badge">⚠️ 出错</span></div><p class="note">${esc(m)}</p></div>`;
+  record({name:'(读取失败)', verdict:'error', findings:[m]});
+}
+
+// ---- 批量检测汇总 + 导出报告 ----
+const results = [];
+function record(row){ results.push(row); updateSummary(); }
+function updateSummary(){
+  const bar = document.getElementById('summary');
+  const n = results.length;
+  if(!n){ bar.hidden = true; return; }
+  const c = v => results.filter(r=>r.verdict===v).length;
+  bar.hidden = false;
+  bar.querySelector('.stat').textContent =
+    `共 ${n} 个 · 🔴 AI ${c('ai')} · 🟠 疑似 ${c('suspect')} · 🟢 未发现 ${c('clean')}`;
+}
+function exportReport(){
+  const head = ['文件名','判定','证据'];
+  const map = {ai:'AI生成',suspect:'疑似/含内容凭证',clean:'未发现',error:'读取失败'};
+  const rows = results.map(r=>[r.name, map[r.verdict]||r.verdict, (r.findings||[]).join(' | ')]);
+  const csv = [head, ...rows].map(row=>row.map(c=>`"${(c+'').replace(/"/g,'""')}"`).join(',')).join('\r\n');
+  const blob = new Blob(['﻿'+csv], {type:'text/csv;charset=utf-8'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `AI检测报告_${new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')}.csv`;
+  a.click();
 }
 
 function renderResult(item, r){
   item.innerHTML = r.cardHtml;
+  record({name:r.name, verdict:r.verdict, findings:r.findings});
   const card = item.querySelector('.card');
   if(!r.canClean) return;
   card.classList.add('hasact');
   const bar = document.createElement('div'); bar.className='actions';
   bar.innerHTML = `
     <button class="act">🧹 去除 AI / AIGC 标识并保存</button>
-    <label class="rnd"><input type="checkbox"> 同时随机化普通元数据</label>
     <span class="msg"></span>`;
   item.appendChild(bar);
-  const btn = bar.querySelector('button'), rnd = bar.querySelector('input'), msg = bar.querySelector('.msg');
+  const btn = bar.querySelector('button'), msg = bar.querySelector('.msg');
   btn.onclick = async ()=>{
     btn.disabled = true; msg.className='msg'; msg.innerHTML = '<span class="spin"></span> 处理中…';
     try{
       const res = await fetch('/clean', {method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({token:r.token, randomize:rnd.checked})});
+        body: JSON.stringify({token:r.token})});
       const j = await res.json();
       if(j.error){ msg.className='msg err'; msg.textContent='失败：'+j.error; btn.disabled=false; return; }
       const clean = j.verdict==='clean';
@@ -180,6 +215,7 @@ function renderResult(item, r){
     }catch(e){ msg.className='msg err'; msg.textContent='失败：'+e.message; btn.disabled=false; }
   };
 }
+document.getElementById('exportBtn').onclick = exportReport;
 </script>
 </body>
 </html>

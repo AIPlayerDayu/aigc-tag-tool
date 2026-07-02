@@ -40,20 +40,13 @@ def idle_watch():
 
 
 # --------------------------------------------------------------------------- #
-#  去标识 / 重写元数据
+#  去除 AI / AIGC 标识（仅移除元数据，不改动画面像素）
 # --------------------------------------------------------------------------- #
-def _rand_datetime():
-    import random
-    y = random.randint(2021, 2024)
-    return f"{y}:{random.randint(1,12):02d}:{random.randint(1,28):02d} " \
-           f"{random.randint(0,23):02d}:{random.randint(0,59):02d}:{random.randint(0,59):02d}"
-
-
 FFMPEG_HELP = ("视频去标识需要 ffmpeg。Windows 请运行： winget install Gyan.FFmpeg "
                "（或 choco install ffmpeg）；macOS 请运行： brew install ffmpeg。装好后重开本工具即可。")
 
 
-def clean_file(src, name, kind, randomize=False):
+def clean_file(src, name, kind):
     """生成一个去除了 AI/AIGC 标识的干净副本，返回 (out_path, out_name)。"""
     stem, ext = os.path.splitext(name)
     out_name = f"{stem}_已去AI标识{ext}"
@@ -65,10 +58,7 @@ def clean_file(src, name, kind, randomize=False):
         if not ff:
             raise RuntimeError(FFMPEG_HELP)
         # 直接流拷贝，去掉全部容器标签（含 AIGC），不重新编码 → 画质无损、速度快
-        cmd = [ff, "-y", "-i", src, "-map_metadata", "-1", "-map", "0", "-c", "copy"]
-        if randomize:
-            cmd += ["-metadata", "encoder=Lavf59.27.100"]
-        cmd.append(out)
+        cmd = [ff, "-y", "-i", src, "-map_metadata", "-1", "-map", "0", "-c", "copy", out]
         r = subprocess.run(cmd, capture_output=True, timeout=600, **detect._NO_WINDOW)
         if r.returncode != 0 or not os.path.exists(out):
             raise RuntimeError("ffmpeg 处理失败：" + r.stderr.decode("utf-8", "replace")[-400:])
@@ -82,11 +72,6 @@ def clean_file(src, name, kind, randomize=False):
                            capture_output=True, timeout=120, **detect._NO_WINDOW)
             if not os.path.exists(out):
                 raise RuntimeError("exiftool 处理失败")
-        if randomize:
-            et = detect.find_exiftool()
-            if et:
-                subprocess.run([et, "-overwrite_original", f"-AllDates={_rand_datetime()}", out],
-                               capture_output=True, timeout=60, **detect._NO_WINDOW)
     return out, out_name
 
 
@@ -120,6 +105,7 @@ class Handler(BaseHTTPRequestHandler):
             "token": token, "name": name, "verdict": r["verdict"],
             "kind": r.get("kind", "image"),
             "canClean": r["verdict"] in ("ai", "suspect"),
+            "findings": [f["label"] for f in r["findings"]],
             "cardHtml": detect.render_card(r),
         }
 
@@ -185,8 +171,7 @@ class Handler(BaseHTTPRequestHandler):
                 info = TOKENS.get(req.get("token", ""))
                 if not info:
                     return self._send(404, '{"error":"token 失效，请重新拖入文件"}')
-                out, out_name = clean_file(info["path"], info["name"],
-                                           info["kind"], bool(req.get("randomize")))
+                out, out_name = clean_file(info["path"], info["name"], info["kind"])
                 # 复检，证明确实干净了
                 rr = detect.analyze(out)
                 resp = {"outName": out_name, "verdict": rr["verdict"],
